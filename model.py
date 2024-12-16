@@ -1,79 +1,88 @@
 def predictionModel(n_days, stock_code):
-    '''
-    This function will get called by callbacks.
-    It will create ML model to predict stock price based on provided number of days and stock ticker
-    '''
-
-    # importing libraries 
+    """
+    Predict stock prices for the next `n_days` using SVR and return a Plotly figure.
+    """
+    # Importing libraries
     import yfinance as yf
     import plotly.graph_objects as go
     from sklearn.model_selection import train_test_split, GridSearchCV
     from sklearn.svm import SVR
     from datetime import date, timedelta
+    import numpy as np
 
-    df = yf.download(stock_code, period='60d') # downloading data for 60days
-    df.reset_index(inplace=True)
-    df['Days'] = df.index # adding new column in dataset
+    try:
+        # Fetch data from Yahoo Finance for the last 6 months
+        df = yf.download(stock_code, period="6mo")
+        if df.empty:
+            raise ValueError("No data found for the given stock ticker.")
 
-    days = []
-    for i in range(len(df['Days'])):
-        days.append([i])
-    
-    # Splitting the dataset
-    X = days
-    y = df.Close
+        df.reset_index(inplace=True)
+        df['Days'] = np.arange(len(df))  # Add a numerical index as 'Days'
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, shuffle=False)
+        # Features and target variable
+        X = df[['Days']].values
+        y = df['Close'].values
 
-    # We are going to use GridSearchCV method
-    # for getting best parameters for our model
-    # first we will provide some parameters as Dict here
-    paramters = {
-        'C':[0.001,0.01,0.1,1,100,1000],
-        'epsilon': [
-                    0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10,
-                    50, 100, 150, 1000
-                ],
-        'gamma': [0.0001, 0.001, 0.005, 0.1, 1, 3, 5, 8, 40, 100, 1000]
-    }
+        # Split the dataset (90% train, 10% test)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, shuffle=False)
 
-    # we will use Support Vector Regressor and kernel as Radial Basis Function
-    gsc = GridSearchCV(
-        estimator=SVR(kernel='rbf'),
-        param_grid=paramters,
-        cv=10,
-        scoring='neg_mean_absolute_error'
-    )
+        # Define parameter grid for GridSearchCV
+        param_grid = {
+            'C': [0.1, 1, 10],
+            'epsilon': [0.01, 0.1, 1],
+            'gamma': ['scale', 'auto']
+        }
 
-    grid_result = gsc.fit(X_train,y_train)
+        # Perform hyperparameter tuning with SVR
+        gsc = GridSearchCV(
+            estimator=SVR(kernel="rbf"),
+            param_grid=param_grid,
+            cv=5,
+            scoring="neg_mean_absolute_error"
+        )
+        gsc.fit(X_train, y_train)
 
-    # storing and using best parameters
-    # best parameters = min error
-    best_param = grid_result.best_params_
-    svr_model = SVR(kernel='rbf', C=best_param['C'], epsilon=best_param['epsilon'], gamma=best_param['gamma'])
-    svr_model.fit(X_train, y_train)
+        # Best parameters from GridSearchCV
+        best_params = gsc.best_params_
+        svr_model = SVR(kernel="rbf", **best_params)
+        svr_model.fit(X_train, y_train)
 
-    output_days = []
-    for i in range(1,n_days+1): # adding n days provided by user to our 60 day
-        output_days.append([i+X_test[-1][0]]) # 60 + n
+        # Prepare future dates for prediction
+        last_day_index = X[-1][0]  # Last day in the training data
+        future_days = np.arange(last_day_index + 1, last_day_index + 1 + n_days).reshape(-1, 1)
 
-    dates = []
-    current = date.today()
-    for i in range(n_days): # creating timeline for future dates
-        current += timedelta(days=1)
-        dates.append(current)
+        # Predict future prices
+        predicted_prices = svr_model.predict(future_days)
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-                x=dates, 
-                y=svr_model.predict(output_days),
-                mode='lines+markers',
-                name='data'))
-    fig.update_layout(
-        title="Predicted Close Price of next " + str(n_days - 1) + " days",
-        xaxis_title="Date",
-        yaxis_title="Closed Price"
-    )
+        # Generate future dates (skipping weekends)
+        future_dates = []
+        current_date = date.today()
+        for _ in range(n_days):
+            while current_date.weekday() >= 5:  # Skip Saturday and Sunday
+                current_date += timedelta(days=1)
+            future_dates.append(current_date)
+            current_date += timedelta(days=1)
 
-    return fig
+        # Plot results
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=future_dates,
+                y=predicted_prices,
+                mode="lines+markers",
+                name="Predicted Prices"
+            )
+        )
+        fig.update_layout(
+            title=f"Predicted Close Price for Next {n_days} Days",
+            xaxis_title="Date",
+            yaxis_title="Close Price",
+            template="plotly_white"
+        )
+
+        return fig
+
+    except Exception as e:
+        print(f"Error in predictionModel: {e}")
+        return go.Figure().update_layout(title="Error generating prediction.")
+
