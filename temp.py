@@ -180,47 +180,17 @@ def update_mygraph(n, ind, start, end, stock_code):
     if end is None:
         end = dt.today()
 
-    try:
-        # Fetch stock data from Yahoo Finance
-        df = yf.download(stock_code, start=start, end=end)
-        
-        # Check if DataFrame is empty
-        if df.empty:
-            return "No data available for the selected dates."
+    df = yf.download(stock_code, start=start, end=end)
+    df.reset_index(inplace=True)
+    df['ema20'] = df['Close'].rolling(20).mean()
+    fig = px.line(df, x='Date', y=['Close'], title='Stock Trend')
+    fig.update_traces(line_color='#ef3d3d')
 
-        # Reset index for better plotting
-        df.reset_index(inplace=True)
+    if ind % 2 != 0:
+        fig.add_scatter(x=df['Date'], y=df['ema20'], line=dict(color='blue', width=1), name='EMA20')
 
-        # Ensure required columns exist
-        if 'Date' not in df.columns or 'Close' not in df.columns:
-            return "The required columns ('Date', 'Close') are missing in the data."
-
-        # Add a rolling average as EMA20
-        df['ema20'] = df['Close'].rolling(20).mean()
-
-        # Debugging: Print the first few rows of the DataFrame to understand its structure
-        print(df.head())
-
-        # Create the basic stock price graph
-        fig = px.line(df, x='Date', y='Close', title='Stock Trend')  # Use y='Close' instead of y=['Close']
-        fig.update_traces(line_color='#ef3d3d')
-
-        # Add the EMA20 line if requested
-        if ind % 2 != 0:
-            fig.add_scatter(x=df['Date'], y=df['ema20'], line=dict(color='blue', width=1), name='EMA20')
-
-        fig.update_layout(xaxis_rangeslider_visible=False, xaxis_title="Date", yaxis_title="Close Price")
-        
-        # Return the figure
-        return dcc.Graph(figure=fig)
-    
-    except Exception as e:
-        # Log any unexpected errors for debugging
-        print(f"Error in fetching or processing data for {stock_code}: {e}")
-        return f"An error occurred: {e}"
-
-
-
+    fig.update_layout(xaxis_rangeslider_visible=False, xaxis_title="Date", yaxis_title="Close Price")
+    return dcc.Graph(figure=fig)
 
 # Forecast graph
 @app.callback(
